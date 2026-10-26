@@ -4,7 +4,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const datestr = s => s ? new Date(s+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : 'No due date';
 const stamp = s => s ? new Date(s).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
 const locations = ['Yorktown','Central Building','Jamestown'];
-const state = {client:null,user:null,profile:null,profiles:[],orders:[],tasks:[],comments:[],time:[],photos:[],reportUser:'all',page:'dashboard',filter:'',status:'all',location:'all',detail:null,signup:false};
+const state = {client:null,user:null,profile:null,profiles:[],orders:[],tasks:[],comments:[],time:[],photos:[],reportUser:'all',analyticsUser:'all',analyticsLocation:'all',analyticsPeriod:'all',analyticsFrom:'',analyticsTo:'',analyticsView:{},page:'dashboard',filter:'',status:'all',location:'all',detail:null,signup:false};
 let toastTimer;
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),3500)}
 function config(){const shared=window.FIELDDESK_CONFIG;if(shared && /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(shared.url||'') && shared.key && !shared.key.includes('PASTE_'))return shared;try{return JSON.parse(localStorage.getItem('fielddesk_config')||'null')}catch{return null}}
@@ -41,7 +41,7 @@ async function loadData(){
 }
 async function refresh(){try{await loadData();render();toast('Workspace updated')}catch(e){toast('Unable to refresh: '+e.message)}}
 function header(title,subtitle,action=''){return `<div class="page-header"><div><div class="eyebrow">Field service workspace</div><h1>${title}</h1><p class="muted">${subtitle}</p></div>${action}</div>`}
-function render(){if(!state.profile)return;$('userName').textContent=state.profile.full_name||state.user.email;$('avatar').textContent=(state.profile.full_name||state.user.email||'T').charAt(0).toUpperCase();$('userRole').textContent=isAdmin()?'Administrator':'Technician';$('teamNav').classList.toggle('hidden',!isAdmin());$('reportNav').classList.toggle('hidden',!isAdmin());if(['team','reports'].includes(state.page)&&!isAdmin())state.page='dashboard';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===state.page));$('breadcrumbs').textContent='Workspace / '+({dashboard:'Overview',orders:'Work orders',mine:'My daily tasks',team:'Team',reports:'Completed work'}[state.page]);const pages={dashboard:dashboard,orders:ordersPage,mine:minePage,team:teamPage,reports:reportPage};$('main').innerHTML=pages[state.page]();wirePage()}
+function render(){if(!state.profile)return;$('userName').textContent=state.profile.full_name||state.user.email;$('avatar').textContent=(state.profile.full_name||state.user.email||'T').charAt(0).toUpperCase();$('userRole').textContent=isAdmin()?'Administrator':'Technician';$('teamNav').classList.toggle('hidden',!isAdmin());$('reportNav').classList.toggle('hidden',!isAdmin());$('analyticsNav').classList.toggle('hidden',!isAdmin());$('adminNavGroup').classList.toggle('hidden',!isAdmin());if(['team','reports','analytics'].includes(state.page)&&!isAdmin())state.page='dashboard';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===state.page));$('breadcrumbs').textContent='Workspace / '+({dashboard:'Overview',orders:'Work orders',mine:'My daily tasks',team:'Team',reports:'Completed work',analytics:'Analytics & Reports'}[state.page]);const pages={dashboard:dashboard,orders:ordersPage,mine:minePage,team:teamPage,reports:reportPage,analytics:analyticsPage};$('main').innerHTML=pages[state.page]();wirePage()}
 function dashboard(){const os=state.orders, open=os.filter(o=>o.status==='open'),progress=os.filter(o=>o.status==='in_progress'),done=os.filter(o=>o.status==='completed');const active=os.filter(o=>o.status!=='completed').slice(0,6);
 return header('Good to see you, '+esc((state.profile.full_name||'there').split(' ')[0])+'.','Here’s what’s happening across your work orders.',isAdmin()?'<button class="primary" data-action="new">+ New work order</button>':'')+`<div class="stats">${[['Total requests',os.length],['Open requests',open.length],['In progress',progress.length],['Completed',done.length]].map(x=>`<div class="stat"><span class="stat-label">${x[0]}</span><strong>${x[1]}</strong><div class="accent"></div></div>`).join('')}</div><div class="grid-2"><div class="panel"><div class="panel-head"><h2>Active work orders</h2><button class="secondary small-btn" data-go="orders">View all →</button></div>${table(active)}</div><div><div class="panel"><div class="panel-head"><h2>Requests by location</h2></div><div class="panel-body"><div class="location-grid">${locations.map(l=>`<div class="location-box"><strong>${os.filter(o=>o.location===l && o.status!=='completed').length}</strong><span>${esc(l)}</span></div>`).join('')}</div></div></div><div class="panel"><div class="panel-head"><h2>My open tasks</h2><button class="secondary small-btn" data-go="mine">Open list →</button></div>${taskList(state.tasks.filter(t=>!t.completed&&os.some(o=>o.id===t.order_id&&canWork(o)&&o.status!=='completed')).slice(0,5))}</div></div></div>`}
 function table(rows){if(!rows.length)return '<div class="empty">No work orders found.</div>';return `<div class="table-wrap"><table><thead><tr><th>Work order</th><th>Location</th><th>Priority</th><th>Status</th><th>Assigned to</th><th>Due</th></tr></thead><tbody>${rows.map(o=>`<tr data-order="${o.id}"><td><div class="strong">${esc(o.title)}</div><div class="subtext">#${esc(o.id.slice(0,8).toUpperCase())}</div></td><td>${esc(o.location)}</td><td>${priorityPill(o.priority)}</td><td>${statusPill(o.status)}</td><td>${esc(profileName(o.assigned_to))}</td><td>${datestr(o.due_date)}</td></tr>`).join('')}</tbody></table></div>`}
@@ -90,7 +90,7 @@ async function uploadOrderPhoto(orderId,form){
   await loadData();openOrder(orderId);toast('Work photo uploaded');
  }catch(e){toast('Photo upload failed: '+e.message)}finally{submit.disabled=false}
 }
-function wirePage(){if($('reportUser'))$('reportUser').onchange=e=>{state.reportUser=e.target.value;render()};loadPhotoUrls();document.querySelectorAll('[data-action="new"]').forEach(b=>b.onclick=newOrder);document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{state.page=b.dataset.go;render()});document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>openOrder(x.dataset.order));document.querySelectorAll('[data-task]').forEach(x=>x.onchange=()=>toggleTask(x.dataset.task,x.checked));if($('searchFilter'))$('searchFilter').oninput=e=>{state.filter=e.target.value;$('tableResults').innerHTML=table(filteredOrders());document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>openOrder(x.dataset.order))};if($('statusFilter'))$('statusFilter').onchange=e=>{state.status=e.target.value;render()};if($('locationFilter'))$('locationFilter').onchange=e=>{state.location=e.target.value;render()}}
+function wirePage(){if(state.page==='analytics')wireAnalytics();if($('reportUser'))$('reportUser').onchange=e=>{state.reportUser=e.target.value;render()};loadPhotoUrls();document.querySelectorAll('[data-action="new"]').forEach(b=>b.onclick=newOrder);document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{state.page=b.dataset.go;render()});document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>openOrder(x.dataset.order));document.querySelectorAll('[data-task]').forEach(x=>x.onchange=()=>toggleTask(x.dataset.task,x.checked));if($('searchFilter'))$('searchFilter').oninput=e=>{state.filter=e.target.value;$('tableResults').innerHTML=table(filteredOrders());document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>openOrder(x.dataset.order))};if($('statusFilter'))$('statusFilter').onchange=e=>{state.status=e.target.value;render()};if($('locationFilter'))$('locationFilter').onchange=e=>{state.location=e.target.value;render()}}
 function modal(content){$('modalDialog').innerHTML=content;$('modalLayer').classList.remove('hidden');$('modalLayer').setAttribute('aria-hidden','false');$('modalDialog').querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal)}
 function closeModal(){$('modalLayer').classList.add('hidden');$('modalLayer').setAttribute('aria-hidden','true');state.detail=null}
 function newOrder(){if(!isAdmin())return;modal(`<div class="modal-heading"><h2>Create work order</h2><button class="close-btn" data-close>×</button></div><form id="newOrderForm"><label>Work order title<input name="title" placeholder="e.g. Repair exhibit lighting" maxlength="160" required></label><label>Description / issue details<textarea name="description" placeholder="Describe the work needed..."></textarea></label><div class="form-grid"><label>Location<select name="location" required>${locations.map(l=>`<option>${l}</option>`).join('')}</select></label><label>Priority<select name="priority"><option>medium</option><option>high</option><option>low</option></select></label><label>Assign technician<select name="assigned_to"><option value="">Unassigned</option>${state.profiles.map(p=>`<option value="${p.id}">${esc(p.full_name||'Unnamed user')} (${esc(p.role)})</option>`).join('')}</select></label><label>Due date<input name="due_date" type="date"></label></div><label>Checklist tasks (one per line)<textarea name="tasks" placeholder="Inspect equipment\nRepair wiring\nTest and document"></textarea></label><div class="modal-actions"><button type="button" class="secondary" data-close>Cancel</button><button class="primary">Create work order</button></div></form>`);$('newOrderForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('.primary');b.disabled=true;const v=Object.fromEntries(new FormData(e.target));try{const order=fail(await state.client.from('work_orders').insert({title:v.title.trim(),description:v.description.trim(),location:v.location,priority:v.priority,assigned_to:v.assigned_to||null,due_date:v.due_date||null,created_by:state.user.id}).select().single());const tasks=v.tasks.split('\n').map(x=>x.trim()).filter(Boolean);if(tasks.length)fail(await state.client.from('order_tasks').insert(tasks.map((title,position)=>({order_id:order.id,title,position}))));await loadData();closeModal();render();toast('Work order created')}catch(err){toast(err.message);b.disabled=false}}}
@@ -107,3 +107,109 @@ async function toggleTask(id,checked,inDetail=false){try{fail(await state.client
 async function setStatus(id,status){if(status==='completed'&&!confirm('Mark this job completed and close the work order?'))return;try{fail(await state.client.rpc('set_work_order_status',{p_order_id:id,p_status:status}));await loadData();openOrder(id);toast(status==='completed'?'Job closed':'Job updated')}catch(e){toast(e.message)}}
 function editOrder(o){modal(`<div class="modal-heading"><h2>Edit work order</h2><button class="close-btn" data-close>×</button></div><form id="editOrderForm"><label>Title<input name="title" value="${esc(o.title)}" required maxlength="160"></label><label>Description<textarea name="description">${esc(o.description||'')}</textarea></label><div class="form-grid"><label>Location<select name="location">${locations.map(l=>`<option ${o.location===l?'selected':''}>${l}</option>`).join('')}</select></label><label>Priority<select name="priority">${['low','medium','high'].map(s=>`<option ${o.priority===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Technician<select name="assigned_to"><option value="">Unassigned</option>${state.profiles.map(p=>`<option value="${p.id}" ${o.assigned_to===p.id?'selected':''}>${esc(p.full_name||'Unnamed user')}</option>`).join('')}</select></label><label>Due date<input type="date" name="due_date" value="${esc(o.due_date||'')}"></label></div><div class="modal-actions"><button class="secondary" type="button" data-close>Cancel</button><button class="primary">Save changes</button></div></form>`);$('editOrderForm').onsubmit=async e=>{e.preventDefault();const v=Object.fromEntries(new FormData(e.target));try{fail(await state.client.from('work_orders').update({title:v.title.trim(),description:v.description,location:v.location,priority:v.priority,assigned_to:v.assigned_to||null,due_date:v.due_date||null}).eq('id',o.id));await loadData();openOrder(o.id);toast('Work order saved')}catch(e){toast(e.message)}}}
 start();
+
+
+// Analytics are admin-only in the UI. The underlying Supabase tables follow
+// the project's existing RLS policies; they must be tightened separately if
+// technician-level access to raw work-order records should also be limited.
+const ANALYTICS_SECTIONS=[
+ ['technicians','Work orders by technician'],
+ ['hours','Hours logged by technician'],
+ ['locations','Work orders by location'],
+ ['averages','Average repair time'],
+ ['trends','Maintenance trends'],
+ ['priority','Work by priority'],
+ ['performance','Individual technician performance'],
+ ['photos','Photo documentation']
+];
+function analyticsWindow(){
+ const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+ const period=state.analyticsPeriod;
+ let start=null,end=null;
+ if(period==='today')start=today;
+ if(period==='week'){start=new Date(today);start.setDate(start.getDate()-((start.getDay()+6)%7));}
+ if(period==='month')start=new Date(today.getFullYear(),today.getMonth(),1);
+ if(period==='year')start=new Date(today.getFullYear(),0,1);
+ if(period==='custom'){
+   if(state.analyticsFrom)start=new Date(state.analyticsFrom+'T00:00:00');
+   if(state.analyticsTo)end=new Date(state.analyticsTo+'T23:59:59.999');
+ }
+ return stampValue=>{if(!stampValue)return false;const d=new Date(stampValue);return !isNaN(d)&&(!start||d>=start)&&(!end||d<=end)};
+}
+function analyticsData(){
+ const inPeriod=analyticsWindow(),uid=state.analyticsUser,loc=state.analyticsLocation;
+ const allowed=o=>(loc==='all'||o.location===loc)&&(uid==='all'||o.assigned_to===uid);
+ const orders=state.orders.filter(allowed);
+ const ids=new Set(orders.map(o=>o.id));
+ const completed=orders.filter(o=>o.status==='completed'&&inPeriod(o.completed_at));
+ const active=orders.filter(o=>o.status!=='completed'&&inPeriod(o.created_at));
+ const time=state.time.filter(t=>ids.has(t.order_id)&&inPeriod(t.created_at)&&(uid==='all'||t.user_id===uid));
+ const tasks=state.tasks.filter(t=>ids.has(t.order_id)&&t.completed&&inPeriod(t.completed_at)&&(uid==='all'||t.completed_by===uid));
+ const photos=state.photos.filter(p=>ids.has(p.order_id)&&inPeriod(p.created_at)&&(uid==='all'||p.user_id===uid));
+ const people=state.profiles.filter(p=>uid==='all'||p.id===uid);
+ return {orders,completed,active,time,tasks,photos,people};
+}
+function aBar(items,unit=''){const top=Math.max(1,...items.map(x=>Number(x[1])||0));return `<div class="analytics-bars">${items.map(([label,value])=>`<div class="analytics-bar-row"><span>${esc(label)}</span><div class="analytics-bar-track"><div class="analytics-bar-fill" style="width:${Math.min(100,Math.max(0,Number(value)||0)/top*100).toFixed(2)}%"></div></div><strong>${Number(value).toLocaleString(undefined,{maximumFractionDigits:2})}${unit}</strong></div>`).join('')||'<p class="note">No data in this period.</p>'}</div>`}
+function aTable(head,rows){return `<div class="table-wrap"><table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(cell=>`<td>${esc(cell)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${head.length}">No matching records</td></tr>`}</tbody></table></div>`}
+function aSection(id,title,body){const isOpen=state.analyticsView[id]!==false;return `<details class="analytics-section panel" data-section="${id}" ${isOpen?'open':''}><summary><strong>${esc(title)}</strong><span class="section-hint">Show / Hide</span></summary><div class="analytics-section-body">${body}</div></details>`}
+function analyticsReports(){
+ const d=analyticsData();const names=id=>profileName(id);
+ const groups=d.people.map(p=>{const os=d.orders.filter(o=>o.assigned_to===p.id),done=d.completed.filter(o=>o.assigned_to===p.id),entries=d.time.filter(t=>t.user_id===p.id),hours=entries.reduce((n,t)=>n+Number(t.hours||0),0);return {id:p.id,name:p.full_name||'Unnamed technician',assigned:os.length,open:d.active.filter(o=>o.assigned_to===p.id&&o.status==='open').length,progress:d.active.filter(o=>o.assigned_to===p.id&&o.status==='in_progress').length,done:done.length,hours,checks:d.tasks.filter(t=>t.completed_by===p.id).length,pics:d.photos.filter(x=>x.user_id===p.id).length};});
+ const totalHours=d.time.reduce((n,t)=>n+Number(t.hours||0),0);
+ const totalDone=d.completed.length;
+ const locationRows=locations.map(l=>[l,d.completed.filter(o=>o.location===l).length,d.active.filter(o=>o.location===l).length,d.time.filter(t=>d.orders.find(o=>o.id===t.order_id&&o.location===l)).reduce((n,t)=>n+Number(t.hours||0),0)]);
+ const priorityRows=['high','medium','low'].map(p=>[p,d.completed.filter(o=>o.priority===p).length,d.active.filter(o=>o.priority===p).length]);
+ const trendMap=new Map();d.completed.forEach(o=>{const day=o.completed_at?.slice(0,10);if(day)trendMap.set(day,(trendMap.get(day)||0)+1)});
+ const trendRows=[...trendMap].sort((a,b)=>a[0].localeCompare(b[0]));
+ const html={
+ technicians:aBar(groups.map(g=>[g.name,g.done]))+aTable(['Technician','Assigned (all dates)','Open (created in period)','In progress (created in period)','Completed in period'],groups.map(g=>[g.name,g.assigned,g.open,g.progress,g.done])),
+ hours:aBar(groups.map(g=>[g.name,g.hours]),' h')+aTable(['Technician','Hours logged in period'],groups.map(g=>[g.name,g.hours.toFixed(2)])),
+ locations:aBar(locationRows.map(x=>[x[0],x[1]]))+aTable(['Location','Completed in period','Active created in period','Hours logged'],locationRows.map(r=>[r[0],r[1],r[2],r[3].toFixed(2)])),
+ averages:`<p class="analytics-large">${totalDone?(totalHours/totalDone).toFixed(2):'—'} <small>hours per completed work order</small></p><p class="note">Total hours logged in the selected period divided by orders completed in that period. This is a period-level workload ratio, not necessarily hours spent exclusively on those completed orders.</p>`,
+ trends:aBar(trendRows.slice(-32).map(x=>x))+aTable(['Date completed','Orders completed'],trendRows),
+ priority:aBar(priorityRows.map(r=>[r[0],r[1]]))+aTable(['Priority','Completed in period','Active created in period'],priorityRows),
+ performance:aTable(['Technician','Completed orders','Completed checklists','Logged hours','Photos uploaded'],groups.map(g=>[g.name,g.done,g.checks,g.hours.toFixed(2),g.pics])),
+ photos:`<p class="note">${d.photos.length} photos uploaded in the chosen period.</p>${d.photos.length?`<div class="photo-grid">${d.photos.map(photoTile).join('')}</div>`:'<p class="note">No photos match these filters.</p>'}`
+ };
+ return {d,groups,totalHours,totalDone,locationRows,priorityRows,trendRows,html};
+}
+function analyticsPage(){
+ if(!isAdmin())return '<div class="empty">Administrator access required.</div>';
+ const r=analyticsReports();
+ const techs=state.profiles.filter(p=>p.role==='technician'||state.orders.some(o=>o.assigned_to===p.id));
+ const option=(val,label,sel)=>`<option value="${esc(val)}" ${val===sel?'selected':''}>${esc(label)}</option>`;
+ const filters=`<div class="panel analytics-filters"><div class="panel-head"><h2>Report filters</h2><button class="secondary small-btn" id="analyticsRefresh">↻ Refresh data</button></div><div class="analytics-filter-grid">
+ <label>Technician<select id="analyticsUser">${option('all','All technicians',state.analyticsUser)}${techs.map(p=>option(p.id,p.full_name||'Unnamed technician',state.analyticsUser)).join('')}</select></label>
+ <label>Location<select id="analyticsLocation">${option('all','All locations',state.analyticsLocation)}${locations.map(l=>option(l,l,state.analyticsLocation)).join('')}</select></label>
+ <label>Date range<select id="analyticsPeriod">${[['all','All dates'],['today','Today'],['week','This week'],['month','This month'],['year','This year'],['custom','Custom range']].map(x=>option(x[0],x[1],state.analyticsPeriod)).join('')}</select></label>
+ <label>From<input type="date" id="analyticsFrom" value="${esc(state.analyticsFrom)}" ${state.analyticsPeriod==='custom'?'':'disabled'}></label>
+ <label>To<input type="date" id="analyticsTo" value="${esc(state.analyticsTo)}" ${state.analyticsPeriod==='custom'?'':'disabled'}></label></div>
+ <div class="analytics-toolbar"><button class="secondary small-btn" id="analyticsAllOpen">Expand all</button><button class="secondary small-btn" id="analyticsAllClosed">Collapse all</button><button class="primary small-btn" id="analyticsExport">Export all reports (CSV)</button></div></div>`;
+ const cards=`<div class="stats"><div class="stat"><span class="stat-label">Completed in period</span><strong>${r.totalDone}</strong></div><div class="stat"><span class="stat-label">Labor hours logged</span><strong>${r.totalHours.toFixed(2)}</strong></div><div class="stat"><span class="stat-label">Completed tasks</span><strong>${r.d.tasks.length}</strong></div><div class="stat"><span class="stat-label">Work photos uploaded</span><strong>${r.d.photos.length}</strong></div></div>`;
+ return header('Analytics & Reports','Administrator-only reporting from your existing work order and technician records.')+filters+cards+ANALYTICS_SECTIONS.map(([id,title])=>aSection(id,title,r.html[id])).join('')+'<p class="note">Reports refresh when you open this page, change filters, or press Refresh data. An order counts as completed for its currently assigned technician; reassignments are not historical attribution. Counts may reflect current status after a job is reopened. Photo and checklist history use the account that performed the action.</p>';
+}
+function csvEscape(v){let s=String(v??'');if(/^[\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'}
+function downloadCsv(name,rows){const csv='\ufeff'+rows.map(row=>row.map(csvEscape).join(',')).join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+function exportAnalytics(){if(!isAdmin())return;const r=analyticsReports(),d=r.d;
+ const rows=[['Report','Technician','Location','Work order','Date','Metric','Value','Notes']];
+ const add=(report,tech,loc,order,date,metric,value,notes='')=>rows.push([report,tech,loc,order,date,metric,value,notes]);
+ d.completed.forEach(o=>add('Completed work orders',profileName(o.assigned_to),o.location,o.title,o.completed_at,'Completed',1,o.id));
+ d.active.forEach(o=>add('Active work orders',profileName(o.assigned_to),o.location,o.title,o.created_at,o.status,1,o.id));
+ d.time.forEach(t=>{const o=d.orders.find(o=>o.id===t.order_id);add('Time entries',profileName(t.user_id),o?.location,o?.title,t.created_at,'Hours',t.hours,t.notes)});
+ d.tasks.forEach(t=>{const o=d.orders.find(o=>o.id===t.order_id);add('Completed checklists',profileName(t.completed_by),o?.location,o?.title,t.completed_at,'Task completed',1,t.title)});
+ d.photos.forEach(p=>{const o=d.orders.find(o=>o.id===p.order_id);add('Photo documentation',profileName(p.user_id),o?.location,o?.title,p.created_at,'Photo uploaded',1,p.caption)});
+ r.groups.forEach(g=>{add('Technician summary',g.name,'','','','Completed orders',g.done);add('Technician summary',g.name,'','','','Hours logged',g.hours.toFixed(2));add('Technician summary',g.name,'','','','Checklist items completed',g.checks)});
+ r.locationRows.forEach(x=>add('Location summary','',x[0],'','','Completed orders',x[1]));
+ r.priorityRows.forEach(x=>add('Priority summary','','','','',x[0]+' completed',x[1]));
+ r.trendRows.forEach(x=>add('Daily trend','','','',x[0],'Completed orders',x[1]));
+ add('Average hours per completed order','','','','','Period ratio',r.totalDone?(r.totalHours/r.totalDone).toFixed(2):'N/A');
+ downloadCsv('FieldDesk-Analytics-'+new Date().toISOString().slice(0,10)+'.csv',rows);
+}
+function wireAnalytics(){
+ ['User','Location','Period','From','To'].forEach(k=>{const el=$('analytics'+k);if(!el)return;el.onchange=e=>{state['analytics'+k]=e.target.value;render()}});
+ if($('analyticsRefresh'))$('analyticsRefresh').onclick=refresh;
+ if($('analyticsExport'))$('analyticsExport').onclick=exportAnalytics;
+ document.querySelectorAll('details[data-section]').forEach(el=>el.addEventListener('toggle',()=>{state.analyticsView[el.dataset.section]=el.open}));
+ if($('analyticsAllOpen'))$('analyticsAllOpen').onclick=()=>document.querySelectorAll('details[data-section]').forEach(el=>el.open=true);
+ if($('analyticsAllClosed'))$('analyticsAllClosed').onclick=()=>document.querySelectorAll('details[data-section]').forEach(el=>el.open=false);
+}
